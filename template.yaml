@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A sample template to get a Lambda function invoked every 10 seconds using Step Functions
+
+Resources:
+  GetLOBSnapshot:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: functions/get_lob_snapshot.lambda_handler
+      Runtime: python3.6
+      Timeout: 5
+      MemorySize: 256
+      Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
+  # MergeLOBSnapshots:
+  #   Type: AWS::Lambda::Function
+  #   Properties:
+  #     Handler: functions/merge_lob_snapshots.lambda_handler
+  #     Runtime: python3.6
+  #     Timeout: 5
+  #     MemorySize: 256
+  #     Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
+      
+  GetLOBSnapshotExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - 
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: "LOBSnapshots"
+      DefinitionString: 
+        !Sub
+          - |-
+            {
+              "Comment": "Invoke Lambda every 10 seconds",
+              "StartAt": "CronTriggered",
+              "States": {
+                "CronTriggered": {
+                  "Type": "Parallel",
+                  "OutputPath": "$",
+                  "ResultPath": "$.ParallelResultPath",
+                  "Next": "MergeAll",
+                  "Branches": [
+                    {
+                     "StartAt": "Immediate",
+                     "States": {
+                        "Immediate": {
+                          "Type": "Task",
+                          "OutputPath": "$",
+                          "ResultPath": "$.book00",
+                          "Resource": "${GetLOBSnapshotArn}",
+                          "End": true
+                        }
+                      }
+                    },
+                    {
+                      "StartAt": "Wait10Seconds",
+                      "States": {
+                        "Wait10Seconds": {
+                          "Type": "Wait",
+                          "Seconds": 10,
+                          "Next": "BookAfter10Seconds"
+                         },
+                         "BookAfter10Seconds": {
+                           "Type": "Task",
+                           "OutputPath": "$",
+                           "ResultPath": "$.book10", 
+                           "Resource": "${GetLOBSnapshotArn}",
+                           "End": true
+                         }
+                       }
+                     },
+                     {
+                      "StartAt": "Wait20Seconds",
+                      "States": {
+                        "Wait20Seconds": {
+                          "Type": "Wait",
+                          "Seconds": 20,
+                          "Next": "BookAfter20Seconds"
+                         },
+                         "BookAfter20Seconds": {
+                           "Type": "Task",
+                           "OutputPath": "$",
+                           "ResultPath": "$.book20", 
+                           "Resource": "${GetLOBSnapshotArn}",
+                           "End": true
+                         }
+                       }
+                     },
+                     {
+                      "StartAt": "Wait30Seconds",
+                      "States": {
+                        "Wait30Seconds": {
+                          "Type": "Wait",
+                          "Seconds": 30,
+                          "Next": "BookAfter30Seconds"
+                         },
+                         "BookAfter30Seconds": {
+                           "Type": "Task",
+                           "OutputPath": "$",
+                           "ResultPath": "$.book30", 
+                           "Resource": "${GetLOBSnapshotArn}",
+                           "End": true
+                         }
+                       }
+                     },
+                     {
+                      "StartAt": "Wait40Seconds",
+                      "States": {
+                        "Wait40Seconds": {
+                          "Type": "Wait",
+                          "Seconds": 40,
+                          "Next": "BookAfter40Seconds"
+                         },
+                         "BookAfter40Seconds": {
+                           "Type": "Task",
+                           "OutputPath": "$",
+                           "ResultPath": "$.book40", 
+                           "Resource": "${GetLOBSnapshotArn}",
+                           "End": true
+                         }
+                       }
+                     },
+                     
+                     {
+                      "StartAt": "Wait50Seconds",
+                      "States": {
+                        "Wait50Seconds": {
+                          "Type": "Wait",
+                          "Seconds": 50,
+                          "Next": "BookAfter50Seconds"
+                        },
+                        "BookAfter50Seconds": {
+                          "Type": "Task",
+                          "OutputPath": "$",
+                          "ResultPath": "$.book50",
+                          "Resource": "${GetLOBSnapshotArn}",
+                          "End": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "MergeAll": {
+                  "Type": "Task",
+                  "InputPath": "$",
+                  "Resource": "${MergeLOBSnapshotsArn}",
+                  "End": true
+                }
+              }
+            }
+          -  {
+            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn,
+            MergeLOBSnapshotsArn: !GetAtt MergeLOBSnapshots.Arn
+            }
+    
+      RoleArn: !GetAtt StateMachineExecutionRole.Arn
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - 
+            Effect: Allow
+            Principal:
+              Service: !Join ["", ["states.", !Ref "AWS::Region", ".amazonaws.com"]]
+            Action: sts:AssumeRole
+      Path: /service-role/
+      Policies:
+        -
+          PolicyName: StepFunctionsInvokeLambda
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt GetLOBSnapshot.Arn
+              - 
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MergeLOBSnapshots.Arn
+  Cron:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Executes Step Functions every minute
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        -
+          Arn: !Ref StateMachine
+          Id: "LOBSnapshots"
+          RoleArn: !GetAtt CronExecutionRole.Arn
+
+  CronExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - 
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /service-role/
+      Policies:
+        -
+          PolicyName: CloudWatchEventsStartStepFunctions
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref StateMachine

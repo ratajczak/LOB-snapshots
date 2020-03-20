@@ -1,0 +1,11 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "sam-lob-poloniex"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1fti72g7fv2bu"
+s3_prefix = "sam-lob-poloniex"
+region = "eu-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "LambdaSize=\"256\""
