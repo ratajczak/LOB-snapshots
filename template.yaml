@@ -7,17 +7,9 @@ Resources:
     Properties:
       Handler: functions/get_lob_snapshot.lambda_handler
       Runtime: python3.6
-      Timeout: 5
+      Timeout: 20
       MemorySize: 256
       Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
-  # MergeLOBSnapshots:
-  #   Type: AWS::Lambda::Function
-  #   Properties:
-  #     Handler: functions/merge_lob_snapshots.lambda_handler
-  #     Runtime: python3.6
-  #     Timeout: 5
-  #     MemorySize: 256
-  #     Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
       
   GetLOBSnapshotExecutionRole:
     Type: AWS::IAM::Role
@@ -33,7 +25,26 @@ Resources:
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
         - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+
+  LOBDumps:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LOBDumps
+      AttributeDefinitions:
+        - AttributeName: Pair
+          AttributeType: S
+        - AttributeName: Timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: Pair
+          KeyType: HASH
+        - AttributeName: Timestamp
+          KeyType: RANGE
+      ProvisionedThroughput:
+          ReadCapacityUnits: 15
+          WriteCapacityUnits: 18
 
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -50,7 +61,7 @@ Resources:
                   "Type": "Parallel",
                   "OutputPath": "$",
                   "ResultPath": "$.ParallelResultPath",
-                  "Next": "MergeAll",
+                  "End": true,
                   "Branches": [
                     {
                      "StartAt": "Immediate",
@@ -151,18 +162,11 @@ Resources:
                       }
                     }
                   ]
-                },
-                "MergeAll": {
-                  "Type": "Task",
-                  "InputPath": "$",
-                  "Resource": "${MergeLOBSnapshotsArn}",
-                  "End": true
                 }
               }
             }
           -  {
-            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn,
-            MergeLOBSnapshotsArn: !GetAtt MergeLOBSnapshots.Arn
+            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn
             }
     
       RoleArn: !GetAtt StateMachineExecutionRole.Arn
@@ -189,10 +193,7 @@ Resources:
                 Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !GetAtt GetLOBSnapshot.Arn
-              - 
-                Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt MergeLOBSnapshots.Arn
+
   Cron:
     Type: AWS::Events::Rule
     Properties:
