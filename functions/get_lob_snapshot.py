@@ -71,4 +71,4 @@ def lambda_handler(event, context):
 
     else:
         print(response)
-        return {"statusCode": response.status_code, "body": "Error"}
+        return {"statusCode": response.status_code, "body": response.text}

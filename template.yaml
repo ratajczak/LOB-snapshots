@@ -8,9 +8,16 @@ Resources:
       Handler: functions/get_lob_snapshot.lambda_handler
       Runtime: python3.6
       Timeout: 20
-      MemorySize: 256
+      #MemorySize: 128
       Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
-      
+  CheckResponses:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: functions/check_responses.lambda_handler
+      Runtime: python3.6
+      Timeout: 20
+      Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
+
   GetLOBSnapshotExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -61,15 +68,13 @@ Resources:
                   "Type": "Parallel",
                   "OutputPath": "$",
                   "ResultPath": "$.ParallelResultPath",
-                  "End": true,
+                  "Next": "CheckResponses",
                   "Branches": [
                     {
                      "StartAt": "Immediate",
                      "States": {
                         "Immediate": {
                           "Type": "Task",
-                          "OutputPath": "$",
-                          "ResultPath": "$.book00",
                           "Resource": "${GetLOBSnapshotArn}",
                           "End": true
                         }
@@ -85,8 +90,6 @@ Resources:
                          },
                          "BookAfter10Seconds": {
                            "Type": "Task",
-                           "OutputPath": "$",
-                           "ResultPath": "$.book10", 
                            "Resource": "${GetLOBSnapshotArn}",
                            "End": true
                          }
@@ -102,8 +105,6 @@ Resources:
                          },
                          "BookAfter20Seconds": {
                            "Type": "Task",
-                           "OutputPath": "$",
-                           "ResultPath": "$.book20", 
                            "Resource": "${GetLOBSnapshotArn}",
                            "End": true
                          }
@@ -119,8 +120,6 @@ Resources:
                          },
                          "BookAfter30Seconds": {
                            "Type": "Task",
-                           "OutputPath": "$",
-                           "ResultPath": "$.book30", 
                            "Resource": "${GetLOBSnapshotArn}",
                            "End": true
                          }
@@ -136,8 +135,6 @@ Resources:
                          },
                          "BookAfter40Seconds": {
                            "Type": "Task",
-                           "OutputPath": "$",
-                           "ResultPath": "$.book40", 
                            "Resource": "${GetLOBSnapshotArn}",
                            "End": true
                          }
@@ -154,19 +151,24 @@ Resources:
                         },
                         "BookAfter50Seconds": {
                           "Type": "Task",
-                          "OutputPath": "$",
-                          "ResultPath": "$.book50",
                           "Resource": "${GetLOBSnapshotArn}",
                           "End": true
                         }
                       }
                     }
                   ]
+                },
+                "CheckResponses": {
+                  "Type": "Task",
+                  "InputPath": "$.ParallelResultPath",
+                  "Resource": "${CheckResponsesArn}",
+                  "End": true
                 }
               }
             }
           -  {
-            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn
+            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn,
+            CheckResponsesArn: !GetAtt CheckResponses.Arn
             }
     
       RoleArn: !GetAtt StateMachineExecutionRole.Arn
@@ -193,7 +195,10 @@ Resources:
                 Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !GetAtt GetLOBSnapshot.Arn
-
+              - 
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt CheckResponses.Arn
   Cron:
     Type: AWS::Events::Rule
     Properties:
