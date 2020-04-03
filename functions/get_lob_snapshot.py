@@ -64,7 +64,8 @@ def lambda_handler(event, context):
             Item = {
                     'Pair': pair,
                     'Timestamp': current_timestamp,
-                    'book': book
+                    'Book': book,
+                    'TTL': current_timestamp + (60 * 60 * 72) #72 hours
                     }
             )
         return {"statusCode": 200, "body": "Success"}
