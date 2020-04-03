@@ -8,8 +8,14 @@ Resources:
       Handler: functions/get_lob_snapshot.lambda_handler
       Runtime: python3.6
       Timeout: 20
-      #MemorySize: 128
       Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
+  GetLOBSnapshotLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: GetLOBSnapshot
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshot]]
+
   CheckResponses:
     Type: AWS::Lambda::Function
     Properties:
@@ -17,6 +23,30 @@ Resources:
       Runtime: python3.6
       Timeout: 20
       Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
+  CheckResponsesLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: CheckResponses
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref CheckResponses]]
+
+  HourlyDumps:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: functions/hourly_dumps.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 256
+      Role: !GetAtt LambdaS3Role.Arn
+      Environment:
+        Variables:
+          DUMPS_BUCKET: !Ref LOBDumpsBucket
+  HourlyDumpsLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: HourlyDumps
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref HourlyDumps]]
 
   GetLOBSnapshotExecutionRole:
     Type: AWS::IAM::Role
@@ -35,6 +65,36 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
         - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
 
+
+  LambdaS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:*
+                Effect: Allow
+                Resource:
+                  - !GetAtt LOBDumpsBucket.Arn
+                  - !Join [ "/", [ !GetAtt LOBDumpsBucket.Arn, "*" ] ] 
+            Version: '2012-10-17'
+          PolicyName: LambdaS3Access
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess
+
+
+
   LOBDumps:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -49,9 +109,23 @@ Resources:
           KeyType: HASH
         - AttributeName: Timestamp
           KeyType: RANGE
+      TimeToLiveSpecification: 
+        AttributeName: TTL
+        Enabled: true
       ProvisionedThroughput:
           ReadCapacityUnits: 15
           WriteCapacityUnits: 18
+
+  LOBDumpsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - NoncurrentVersionExpirationInDays: 3
+            Status: Enabled
 
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
