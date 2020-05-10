@@ -22,12 +22,6 @@ Resources:
         Variables:
           TABLE_NAME: !Ref CacheLOBDumps
 
-  GetLOBSnapshotLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties: 
-      RetentionInDays: 7
-      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshots]]
-
   HourlyDumps:
     Type: AWS::Serverless::Function
     Properties:
@@ -51,12 +45,6 @@ Resources:
         Variables:
             TABLE_NAME: !Ref CacheLOBDumps
             DUMPS_BUCKET: !Ref LimitOrderBookSnapshots
-
-  HourlyDumpsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties: 
-      RetentionInDays: 7
-      LogGroupName: !Join ["", ["/aws/lambda/", !Ref HourlyDumps]]
 
   CacheLOBDumps:
     Type: AWS::DynamoDB::Table
@@ -89,3 +77,46 @@ Resources:
         Rules:
           - NoncurrentVersionExpirationInDays: 3
             Status: Enabled
+
+  GetLOBSnapshotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshots]]
+
+  HourlyDumpsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref HourlyDumps]]
+
+
+  MetricFilter:
+      Type: AWS::Logs::MetricFilter
+      Properties:
+        LogGroupName: !Ref HourlyDumpsLogGroup
+        FilterPattern: '[Missing, Gap]'
+        MetricTransformations:
+        - MetricValue: '1'
+          MetricNamespace: test/missingData
+          MetricName: missingSnapshots
+  Alarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: Missing LOB snapshots on attept to move them to S3
+        MetricName: missingSnapshots
+        Namespace: test/missingData
+        Statistic: Sum
+        Period: 3600
+        EvaluationPeriods: 1
+        Threshold: 1
+        AlarmActions:
+        - !Ref AlarmNotificationTopic
+        ComparisonOperator: GreaterThanThreshold
+
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    # Properties:
+    #   Subscription:
+    #   - Protocol: email
+    #     Endpoint: me@example.co.uk
