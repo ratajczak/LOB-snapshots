@@ -1,104 +1,67 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: A sample template to get a Lambda function invoked every 10 seconds using Step Functions
+AWSTemplateFormatVersion : '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless app for saving Poloniex limit order book every 10 seconds.
 
 Resources:
-  GetLOBSnapshot:
-    Type: AWS::Lambda::Function
+  GetLOBSnapshots:
+    Type: AWS::Serverless::Function
     Properties:
-      Handler: functions/get_lob_snapshot.lambda_handler
-      Runtime: python3.6
-      Timeout: 20
-      Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
-  GetLOBSnapshotLogGroup:
-    Type: AWS::Logs::LogGroup
-    DependsOn: GetLOBSnapshot
-    Properties: 
-      RetentionInDays: 7
-      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshot]]
-
-  CheckResponses:
-    Type: AWS::Lambda::Function
-    Properties:
-      Handler: functions/check_responses.lambda_handler
-      Runtime: python3.6
-      Timeout: 20
-      Role: !GetAtt GetLOBSnapshotExecutionRole.Arn
-  CheckResponsesLogGroup:
-    Type: AWS::Logs::LogGroup
-    DependsOn: CheckResponses
-    Properties: 
-      RetentionInDays: 7
-      LogGroupName: !Join ["", ["/aws/lambda/", !Ref CheckResponses]]
-
-  HourlyDumps:
-    Type: AWS::Lambda::Function
-    Properties:
-      Handler: functions/hourly_dumps.lambda_handler
-      Runtime: python3.6
-      Timeout: 900
-      MemorySize: 256
-      Role: !GetAtt LambdaS3Role.Arn
+      Handler: functions/get_lob_snapshots.lambda_handler
+      Runtime: python3.7
+      Timeout: 90
+      Policies:
+        -
+          DynamoDBWritePolicy:
+            TableName: !Ref CacheLOBDumps
+      Events:
+        RunLOBSnapshotsEveryMinute:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0/1 * * * ? *) # every minute
       Environment:
         Variables:
-          DUMPS_BUCKET: !Ref LOBDumpsBucket
+          TABLE_NAME: !Ref CacheLOBDumps
+
+  GetLOBSnapshotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshots]]
+
+  HourlyDumps:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/hourly_dumps.lambda_handler
+      Runtime: python3.7
+      Timeout: 900
+      MemorySize: 2048 #1728
+      Policies:
+        -
+          DynamoDBReadPolicy:
+            TableName: !Ref CacheLOBDumps
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunHourlyDumpsEveryHour:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 * * * ? *) # every hour
+      Environment:
+        Variables:
+            TABLE_NAME: !Ref CacheLOBDumps
+            DUMPS_BUCKET: !Ref LimitOrderBookSnapshots
+
   HourlyDumpsLogGroup:
     Type: AWS::Logs::LogGroup
-    DependsOn: HourlyDumps
     Properties: 
       RetentionInDays: 7
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref HourlyDumps]]
 
-  GetLOBSnapshotExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - 
-            Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
-        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
-
-
-  LambdaS3Role:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action:
-              - sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-        Version: '2012-10-17'
-      Policies:
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - s3:*
-                Effect: Allow
-                Resource:
-                  - !GetAtt LOBDumpsBucket.Arn
-                  - !Join [ "/", [ !GetAtt LOBDumpsBucket.Arn, "*" ] ] 
-            Version: '2012-10-17'
-          PolicyName: LambdaS3Access
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess
-
-
-
-  LOBDumps:
+  CacheLOBDumps:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: LOBDumps
+      TableName: CacheLOBDumps
       AttributeDefinitions:
         - AttributeName: Pair
           AttributeType: S
@@ -113,10 +76,10 @@ Resources:
         AttributeName: TTL
         Enabled: true
       ProvisionedThroughput:
-          ReadCapacityUnits: 15
-          WriteCapacityUnits: 18
+          ReadCapacityUnits: 20
+          WriteCapacityUnits: 21
 
-  LOBDumpsBucket:
+  LimitOrderBookSnapshots:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
@@ -126,184 +89,3 @@ Resources:
         Rules:
           - NoncurrentVersionExpirationInDays: 3
             Status: Enabled
-
-  StateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: "LOBSnapshots"
-      DefinitionString: 
-        !Sub
-          - |-
-            {
-              "Comment": "Invoke Lambda every 10 seconds",
-              "StartAt": "CronTriggered",
-              "States": {
-                "CronTriggered": {
-                  "Type": "Parallel",
-                  "OutputPath": "$",
-                  "ResultPath": "$.ParallelResultPath",
-                  "Next": "CheckResponses",
-                  "Branches": [
-                    {
-                     "StartAt": "Immediate",
-                     "States": {
-                        "Immediate": {
-                          "Type": "Task",
-                          "Resource": "${GetLOBSnapshotArn}",
-                          "End": true
-                        }
-                      }
-                    },
-                    {
-                      "StartAt": "Wait10Seconds",
-                      "States": {
-                        "Wait10Seconds": {
-                          "Type": "Wait",
-                          "Seconds": 10,
-                          "Next": "BookAfter10Seconds"
-                         },
-                         "BookAfter10Seconds": {
-                           "Type": "Task",
-                           "Resource": "${GetLOBSnapshotArn}",
-                           "End": true
-                         }
-                       }
-                     },
-                     {
-                      "StartAt": "Wait20Seconds",
-                      "States": {
-                        "Wait20Seconds": {
-                          "Type": "Wait",
-                          "Seconds": 20,
-                          "Next": "BookAfter20Seconds"
-                         },
-                         "BookAfter20Seconds": {
-                           "Type": "Task",
-                           "Resource": "${GetLOBSnapshotArn}",
-                           "End": true
-                         }
-                       }
-                     },
-                     {
-                      "StartAt": "Wait30Seconds",
-                      "States": {
-                        "Wait30Seconds": {
-                          "Type": "Wait",
-                          "Seconds": 30,
-                          "Next": "BookAfter30Seconds"
-                         },
-                         "BookAfter30Seconds": {
-                           "Type": "Task",
-                           "Resource": "${GetLOBSnapshotArn}",
-                           "End": true
-                         }
-                       }
-                     },
-                     {
-                      "StartAt": "Wait40Seconds",
-                      "States": {
-                        "Wait40Seconds": {
-                          "Type": "Wait",
-                          "Seconds": 40,
-                          "Next": "BookAfter40Seconds"
-                         },
-                         "BookAfter40Seconds": {
-                           "Type": "Task",
-                           "Resource": "${GetLOBSnapshotArn}",
-                           "End": true
-                         }
-                       }
-                     },
-                     
-                     {
-                      "StartAt": "Wait50Seconds",
-                      "States": {
-                        "Wait50Seconds": {
-                          "Type": "Wait",
-                          "Seconds": 50,
-                          "Next": "BookAfter50Seconds"
-                        },
-                        "BookAfter50Seconds": {
-                          "Type": "Task",
-                          "Resource": "${GetLOBSnapshotArn}",
-                          "End": true
-                        }
-                      }
-                    }
-                  ]
-                },
-                "CheckResponses": {
-                  "Type": "Task",
-                  "InputPath": "$.ParallelResultPath",
-                  "Resource": "${CheckResponsesArn}",
-                  "End": true
-                }
-              }
-            }
-          -  {
-            GetLOBSnapshotArn: !GetAtt GetLOBSnapshot.Arn,
-            CheckResponsesArn: !GetAtt CheckResponses.Arn
-            }
-    
-      RoleArn: !GetAtt StateMachineExecutionRole.Arn
-
-  StateMachineExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - 
-            Effect: Allow
-            Principal:
-              Service: !Join ["", ["states.", !Ref "AWS::Region", ".amazonaws.com"]]
-            Action: sts:AssumeRole
-      Path: /service-role/
-      Policies:
-        -
-          PolicyName: StepFunctionsInvokeLambda
-          PolicyDocument: 
-            Version: "2012-10-17"
-            Statement: 
-              - 
-                Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt GetLOBSnapshot.Arn
-              - 
-                Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt CheckResponses.Arn
-  Cron:
-    Type: AWS::Events::Rule
-    Properties:
-      Description: Executes Step Functions every minute
-      ScheduleExpression: rate(1 minute)
-      State: ENABLED
-      Targets:
-        -
-          Arn: !Ref StateMachine
-          Id: "LOBSnapshots"
-          RoleArn: !GetAtt CronExecutionRole.Arn
-
-  CronExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - 
-            Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /service-role/
-      Policies:
-        -
-          PolicyName: CloudWatchEventsStartStepFunctions
-          PolicyDocument: 
-            Version: "2012-10-17"
-            Statement: 
-              - 
-                Effect: Allow
-                Action: states:StartExecution
-                Resource: !Ref StateMachine
