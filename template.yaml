@@ -2,6 +2,11 @@ AWSTemplateFormatVersion : '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Serverless app for saving Poloniex limit order book every 10 seconds.
 
+Parameters:
+  NotificationEmail:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: myemail # aws ssm put-parameter --name "" --type String --value "" --region eu-west-2
+
 Resources:
   GetLOBSnapshots:
     Type: AWS::Serverless::Function
@@ -17,7 +22,7 @@ Resources:
         RunLOBSnapshotsEveryMinute:
           Type: Schedule
           Properties:
-            Schedule: cron(0/1 * * * ? *) # every minute
+            Schedule: cron(* * * * ? *) # every minute
       Environment:
         Variables:
           TABLE_NAME: !Ref CacheLOBDumps
@@ -78,33 +83,57 @@ Resources:
           - NoncurrentVersionExpirationInDays: 3
             Status: Enabled
 
-  GetLOBSnapshotLogGroup:
+  LogGroupGetLOBSnapshots:
     Type: AWS::Logs::LogGroup
     Properties: 
       RetentionInDays: 7
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLOBSnapshots]]
 
-  HourlyDumpsLogGroup:
+  LogGroupHourlyDumps:
     Type: AWS::Logs::LogGroup
     Properties: 
       RetentionInDays: 7
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref HourlyDumps]]
 
+  MetricFilterGetLOBSnapshots:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetLOBSnapshots
+      FilterPattern: '[Exception, Error]'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetLOBSnapshotsError
 
-  MetricFilter:
-      Type: AWS::Logs::MetricFilter
-      Properties:
-        LogGroupName: !Ref HourlyDumpsLogGroup
-        FilterPattern: '[Missing, Gap]'
-        MetricTransformations:
-        - MetricValue: '1'
-          MetricNamespace: test/missingData
-          MetricName: missingSnapshots
-  Alarm:
+  MetricFilterHourlyDumps:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupHourlyDumps
+      FilterPattern: '[Exception, Error, Missing, Gap]'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: MissingSnapshotsInDynamoDB
+
+  AlarmGetLOBSnapshots:
       Type: AWS::CloudWatch::Alarm
       Properties:
         AlarmDescription: Missing LOB snapshots on attept to move them to S3
-        MetricName: missingSnapshots
+        MetricName: GetLOBSnapshotsError
+        Namespace: test/missingData
+        Statistic: Sum
+        Period: 3600
+        EvaluationPeriods: 1
+        Threshold: 1
+        AlarmActions:
+        - !Ref AlarmNotificationTopic
+        ComparisonOperator: GreaterThanThreshold
+
+  AlarmHourlyDumps:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: LOB snapshot not saved to Dynamodb
+        MetricName: MissingSnapshotsInDynamoDB
         Namespace: test/missingData
         Statistic: Sum
         Period: 3600
@@ -116,7 +145,7 @@ Resources:
 
   AlarmNotificationTopic:
     Type: AWS::SNS::Topic
-    # Properties:
-    #   Subscription:
-    #   - Protocol: email
-    #     Endpoint: me@example.co.uk
+    Properties:
+      Subscription:
+      - Protocol: email
+        Endpoint: !Ref NotificationEmail
