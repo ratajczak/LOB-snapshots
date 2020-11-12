@@ -1,0 +1,12 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "limit-order-books-poloniex-backup"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-otyica3y5urd"
+s3_prefix = "limit-order-books-poloniex-backup"
+region = "us-west-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "NotificationEmail=\"myemail\""
+

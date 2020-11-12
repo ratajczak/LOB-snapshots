@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless app for saving Poloniex limit order book every 10 seconds.
+
+Parameters:
+  NotificationEmail:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: myemail # aws ssm put-parameter --name "" --type String --value "" --region eu-west-2
+
+Resources:
+  SaveOnS3:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/save_on_s3.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBooks
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(11,23,35,47,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBooks
+
+
+  LimitOrderBooks:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - NoncurrentVersionExpirationInDays: 3
+            Status: Enabled
+
+  LogGroupSaveOnS3:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref SaveOnS3]]
+
+
+  MetricFilterSaveOnS3:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupSaveOnS3
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetBooksError
+
+  AlarmGetBooks:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: Snapshot not saved to temp folder
+        MetricName: GetBooksError
+        Namespace: test/missingData
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        TreatMissingData: notBreaching
+        AlarmActions:
+        - !Ref AlarmNotificationTopic
+        ComparisonOperator: GreaterThanThreshold
+
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Protocol: email
+        Endpoint: !Ref NotificationEmail

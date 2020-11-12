@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless app for saving Poloniex limit order book every 10 seconds.
+
+Parameters:
+  NotificationEmail:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: myemail # aws ssm put-parameter --name "" --type String --value "" --region eu-west-2
+
+Resources:
+  GetSnapshots0:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 0
+
+  GetSnapshots1:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 1
+
+  GetSnapshots2:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 2
+
+  GetSnapshots3:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 3
+
+  GetSnapshots4:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 4
+
+  GetSnapshots5:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions/get_snapshots.lambda_handler
+      Runtime: python3.6
+      Timeout: 900
+      MemorySize: 128
+      Policies:
+        -
+          S3CrudPolicy:
+            BucketName: !Ref LimitOrderBookSnapshots
+      Events:
+        RunEveryTenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      Environment:
+        Variables:
+          BUCKET: !Ref LimitOrderBookSnapshots
+          DELAY: 5
+
+  LimitOrderBookSnapshots:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - NoncurrentVersionExpirationInDays: 3
+            Status: Enabled
+
+  LogGroupGetSnapshots0:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots0]]
+
+  LogGroupGetSnapshots1:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots1]]
+
+  LogGroupGetSnapshots2:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots2]]
+
+  LogGroupGetSnapshots3:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots3]]
+
+  LogGroupGetSnapshots4:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots4]]
+
+  LogGroupGetSnapshots5:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 7
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots5]]
+
+  MetricFilterGetSnapshots0:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots0
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  MetricFilterGetSnapshots1:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots1
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  MetricFilterGetSnapshots2:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots2
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  MetricFilterGetSnapshots3:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots3
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  MetricFilterGetSnapshots4:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots4
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  MetricFilterGetSnapshots5:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupGetSnapshots5
+      FilterPattern: '?Exception ?Error ?error'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
+  AlarmGetSnapshots:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: Snapshot not saved to temp folder
+        MetricName: GetSnapshotsError
+        Namespace: test/missingData
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        TreatMissingData: notBreaching
+        AlarmActions:
+        - !Ref AlarmNotificationTopic
+        ComparisonOperator: GreaterThanThreshold
+
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Protocol: email
+        Endpoint: !Ref NotificationEmail
