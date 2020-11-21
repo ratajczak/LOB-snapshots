@@ -60,8 +60,8 @@ def lambda_handler(event, context):
     till_next_minute = (60 - gmtime().tm_sec % 60) % 60
     threads = []
 
-    # Start threads with 10 second interval for 10 minutes (60 in total)
-    # executed 6 times an hour = 360 snapshots an hour in total
+    # Start threads with 6 second interval for 10 minutes (100 in total)
+    # executed 6 times an hour = 600 snapshots an hour in total
     for seconds_to_wait in range(till_next_minute + int(delay), till_next_minute + int(delay) + 10 * 60, 6):
         thread = Timer(seconds_to_wait, get_lob_snapshot, [context.aws_request_id])
 
