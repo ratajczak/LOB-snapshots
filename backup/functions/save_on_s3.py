@@ -1,10 +1,11 @@
 from os import makedirs, environ, listdir, remove, path
 from time import gmtime, sleep, strftime
 from json import loads, dumps
-from requests import get
+import requests
+from time import time
 from threading import Timer
 from boto3 import client
-from gzip import compress
+import gzip
 
 # import ptvsd
 # ptvsd.enable_attach(address=('0.0.0.0', 5890), redirect_output=True)
@@ -13,35 +14,29 @@ from gzip import compress
 TEMP_FOLDER = '/tmp/LOB'
 makedirs(TEMP_FOLDER, exist_ok=True) 
 
+#bucket = 'limit-order-books-poloniex-backup-limitorderbooks-1b4kpx6y6lq48'
 bucket = environ['BUCKET']
+
 s3_client = client('s3')
 
-def get_books(request_id):
+def get_books(request_id, temp_file):
 
     # Get LOB snapshots for all pairs from Poloniex
     request_time = gmtime()
     print(strftime(f'Thread executed %H-%M-%S RequestId: {request_id}', request_time))
 
-    response = get('https://poloniex.com/public?command=returnOrderBook&currencyPair=all&depth=100')
+    response = requests.get('https://poloniex.com/public?command=returnOrderBook&currencyPair=all&depth=100')
     if response.status_code == 200:
         all_books = response.content
+        json_key = strftime('%Y%m%d_%H%M%S', request_time)
 
-        this_hour = strftime('%Y%m%d_%H', request_time)
-        this_minute_second = strftime('%M%S', request_time)
-        part = int(request_time.tm_min / 12) # Lambda fires 60 / 12 = 5 times a hour
-
-        file_name = f'{TEMP_FOLDER}/{this_hour}-{part}'
-
-        # comma in front if appending
-        if path.exists(file_name):
-            book_json_string = b',"' + bytes(this_hour, 'utf-8') + bytes(this_minute_second, 'utf-8') + b'":' + all_books
+        # comma in front if not earliest thread
+        if temp_file.tell() == 0:
+            book_json_string = b'{"' + bytes(json_key, 'utf-8') + b'":' + all_books
         else:
-            book_json_string = b'"' + bytes(this_hour, 'utf-8') + bytes(this_minute_second, 'utf-8') + b'":' + all_books
+            book_json_string = b',\n"' + bytes(json_key, 'utf-8') + b'":' + all_books
 
-        with open(file_name, 'ab') as outfile:
-            outfile.write(all_books)
-            outfile.close()
-            #print(strftime(f'Snapshot {filename} appended RequestId: {request_id}', request_time))
+        temp_file.write(book_json_string)
 
     else:
         print(strftime(f'Books snapshot for %H-%M-%S download error RequestId: {request_id}', request_time))
@@ -51,16 +46,19 @@ def get_books(request_id):
     return
 
 def lambda_handler(event, context):
-    # starting from next miute (to mitigate delayed AWS cron starts)
-    sleep(1) # ensure not first second
-    till_next_minute = (60 - gmtime().tm_sec % 60) % 60
+
+    now_plus_one_minute = gmtime(time() + 60) # Lambda starts one minute earlier
+    this_hour = strftime('%Y%m%d_%H', now_plus_one_minute)
+    part = int(now_plus_one_minute.tm_min / 6) # Lambda starts 60 / 6 = 10 times a hour
+
+    temp_file_name = f'{TEMP_FOLDER}/{this_hour}-{part}.json'
+    temp_file = open(temp_file_name, 'ab+')
+
     threads = []
-
-    # Start threads with 10 second interval for 12 minutes (60 in total)
-    # executed 6 times an hour = 360 snapshots an hour in total
-    for seconds_to_wait in range(till_next_minute, till_next_minute + 12 * 60, 5):
-        thread = Timer(seconds_to_wait, get_books, [context.aws_request_id])
-
+    # Starting from next miute (to mitigate delayed AWS cron starts) with 4 second interval for 6 minutes (90 in total)
+    till_next_minute = (60 - gmtime().tm_sec % 60) % 60
+    for seconds_to_wait in range(till_next_minute, till_next_minute + 6 * 60, 4):
+        thread = Timer(seconds_to_wait, get_books, [context.aws_request_id, temp_file])
         thread.start()
         threads.append(thread)
 
@@ -68,32 +66,48 @@ def lambda_handler(event, context):
     for thread in threads:
         thread.join()
 
-    files = listdir(TEMP_FOLDER)
-    for file_name in files:
+    print('All threads finished')
 
-        year = file_name[0:4]
-        month = file_name[4:6]
-        day = file_name[6:8]
+    temp_file.write(b'}') # close json afer all trhreads appended
 
-        key = f'{year}/{month}/{day}/{file_name}.json.gz'
+    temp_file.seek(0) # rewind to the beginning of the file
+    compressed_file = gzip.open(f'{temp_file_name}.gz', 'wb')
 
-        with open(f'{TEMP_FOLDER}/{file_name}', 'rb') as in_file:
-            books_file = in_file.read()
-            books = b'{' + books_file + b'}' 
-            zipped_books = compress(books)
+    while True:
+        data = temp_file.read(10*2**20) # 10MB chunks
+        if not data:
+            break
+        compressed_file.write(data)
 
-            try:
-                s3_client.put_object(
-                    Bucket=bucket,
-                    Body=zipped_books,
-                    Key=key,
-                    ContentType = 'application/json',
-                    ContentEncoding = 'gzip'
-                )
+    temp_file.close()
+    compressed_file.close()
 
-                print(f'Saved {key}')
-                remove(f'{TEMP_FOLDER}/{file_name}') 
+    print('Temporary file compressed')
 
-            except Exception as e:
-                print(f'Error during copying {file_name} to S3')
-                print(e)
+    print(listdir(TEMP_FOLDER))
+
+    year = this_hour[0:4]
+    month = this_hour[4:6]
+    day = this_hour[6:8]
+    key = f'{year}/{month}/{day}/{this_hour}-{part}.json.gz'
+
+    try:
+        s3_client.upload_file(
+            f'{temp_file_name}.gz',
+            bucket,
+            key,
+            ExtraArgs={'ContentType': 'application/json', 'ContentEncoding': 'gzip'}
+        )
+
+        print(f'Saved {key}')
+        remove(f'{temp_file_name}')
+        remove(f'{temp_file_name}.gz')
+
+    except Exception as e:
+        print(f'Error during copying {temp_file_name}.gz to S3')
+        print(e)
+    return
+
+# context = type('', (), {})()
+# context.aws_request_id = "abc"
+# lambda_handler(context, context)

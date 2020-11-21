@@ -12,7 +12,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: functions/save_on_s3.lambda_handler
-      Runtime: python3.6
+      Runtime: python3.8
       Timeout: 900
       MemorySize: 128
       Policies:
@@ -23,7 +23,7 @@ Resources:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
-            Schedule: cron(11,23,35,47,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+            Schedule: cron(5,11,17,23,29,35,41,47,53,59 * * * ? *) # every 6 minutes starting at 5th minute of each hour
       Environment:
         Variables:
           BUCKET: !Ref LimitOrderBooks
