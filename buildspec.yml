@@ -1,0 +1,40 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      docker: 18
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
+      - echo ACCOUNT_ID=$ACCOUNT_ID
+      - echo SERVICE_NAME=$SERVICE_NAME
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/$SERVICE_NAME
+      - IMAGE_TAG=version_$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - echo IMAGE_TAG=$IMAGE_TAG
+      - docker build -t $REPOSITORY_URI:latest .
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      # Create a valid json file that will be used to create a new task definition version
+      # Using sed we need to replace variables
+      - echo Creating a task definition json
+      - sed "s+\$APP_IMAGE+$REPOSITORY_URI:$IMAGE_TAG+g; s+\$SERVICE_NAME+$SERVICE_NAME+g; s+\$ACCOUNT_ID+$ACCOUNT_ID+g;" taskdef.json > register-task-definition.json
+      
+      # Using the aws cli we need to register a new task definition to create a valid appspec.yaml
+      - echo Creating an appspec.yaml file
+      - TASK_DEFINITION_ARN=`aws ecs register-task-definition --cli-input-json "$(cat register-task-definition.json)" --query 'taskDefinition.taskDefinitionArn' --output text`
+     - sed "s+\$TASK_DEFINITION_ARN+$TASK_DEFINITION_ARN+g; s+\$SERVICE_NAME+$SERVICE_NAME+g;" appspec.yml > appspec.yaml
+artifacts:
+  files:
+    - appspec.yaml
+    - register-task-definition.json
+discard-paths: yes
