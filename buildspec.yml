@@ -10,7 +10,8 @@ phases:
       - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
       - echo ACCOUNT_ID=$ACCOUNT_ID
       - echo SERVICE_NAME=$SERVICE_NAME
-      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/$SERVICE_NAME
+      - echo ECR_NAME=$ECR_URL
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/$ECR_NAME
       - IMAGE_TAG=version_$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
   build:
     commands:
@@ -39,4 +40,3 @@ artifacts:
   files:
     # - appspec.yaml
     - register-task-definition.json
-discard-paths: yes
