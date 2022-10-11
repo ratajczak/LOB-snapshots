@@ -30,11 +30,13 @@ phases:
       - sed "s+\$APP_IMAGE+$REPOSITORY_URI:$IMAGE_TAG+g; s+\$SERVICE_NAME+$SERVICE_NAME+g; s+\$ACCOUNT_ID+$ACCOUNT_ID+g;" taskdef.json > register-task-definition.json
       
       # Using the aws cli we need to register a new task definition to create a valid appspec.yaml
-      - echo Creating an appspec.yaml file
       - TASK_DEFINITION_ARN=`aws ecs register-task-definition --cli-input-json "$(cat register-task-definition.json)" --query 'taskDefinition.taskDefinitionArn' --output text`
-     - sed "s+\$TASK_DEFINITION_ARN+$TASK_DEFINITION_ARN+g; s+\$SERVICE_NAME+$SERVICE_NAME+g;" appspec.yml > appspec.yaml
+
+      # - echo Creating an appspec.yaml file
+      # - sed "s+\$TASK_DEFINITION_ARN+$TASK_DEFINITION_ARN+g; s+\$SERVICE_NAME+$SERVICE_NAME+g;" appspec.yml > appspec.yaml
+      
 artifacts:
   files:
-    - appspec.yaml
+    # - appspec.yaml
     - register-task-definition.json
 discard-paths: yes
