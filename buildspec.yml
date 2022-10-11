@@ -29,9 +29,10 @@ phases:
       # Using sed we need to replace variables
       - echo Creating a task definition json
       - sed "s+\$APP_IMAGE+$REPOSITORY_URI:$IMAGE_TAG+g; s+\$SERVICE_NAME+$SERVICE_NAME+g; s+\$ACCOUNT_ID+$ACCOUNT_ID+g;" taskdef.json > register-task-definition.json
-      
+      - cat register-task-definition.json
       # Using the aws cli we need to register a new task definition to create a valid appspec.yaml
-      - TASK_DEFINITION_ARN=`aws ecs register-task-definition --cli-input-json "$(cat register-task-definition.json)" --query 'taskDefinition.taskDefinitionArn' --output text`
+      - aws ecs register-task-definition --cli-input-json "$(cat register-task-definition.json)"
+      #- TASK_DEFINITION_ARN=`aws ecs register-task-definition --cli-input-json "$(cat register-task-definition.json)" --query 'taskDefinition.taskDefinitionArn' --output text`
 
       # - echo Creating an appspec.yaml file
       # - sed "s+\$TASK_DEFINITION_ARN+$TASK_DEFINITION_ARN+g; s+\$SERVICE_NAME+$SERVICE_NAME+g;" appspec.yml > appspec.yaml
