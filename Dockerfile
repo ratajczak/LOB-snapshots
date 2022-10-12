@@ -1,3 +1,5 @@
 FROM amazonlinux:2022
 
-CMD ["python3", "-V"]
+COPY aggregation.py .
+
+CMD ["python3", "aggregation.py"]
