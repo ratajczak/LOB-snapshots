@@ -8,11 +8,10 @@ phases:
       - echo Logging in to Amazon ECR...
       - aws --version
       - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
-      - echo AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
       - echo ACCOUNT_ID=$ACCOUNT_ID
-      - echo REGION=$REGION
-      - echo ECR_NAME=$ECR_URL
-      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$ECR_NAME
+      - echo ECR_NAME=$ECR_NAME
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_NAME
+      - aws s3 cp s3://aws-sam-cli-managed-default-samclisourcebucket-aaas4k78950g/aggregation_s3.py .
 
   build:
     commands:

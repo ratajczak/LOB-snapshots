@@ -1,5 +1,5 @@
 FROM amazonlinux:2022
 
-COPY aggregation.py .
+COPY aggregation_s3.py .
 
-CMD ["python3", "aggregation.py"]
+CMD ["python3", "aggregation_s3.py"]
