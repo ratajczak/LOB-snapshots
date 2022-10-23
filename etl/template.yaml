@@ -6,179 +6,542 @@ Parameters:
   NotificationEmail:
     Type: AWS::SSM::Parameter::Value<String>
     Default: myemail # aws ssm put-parameter --name "" --type String --value "" --region eu-west-2
+  SpotBidPrice:
+    Default: 0.0246
+    Description: Spot Instance bid price
+    Type: String
+  DailyAggregationServiceName:
+    Description: String text of service name
+    Default: 'LOBDailyAggregation'
+    Type: String
 
 Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.11.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.12.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.2.0/24
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+
+  NatInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t4g.nano
+      ImageId: ami-0636eac5d73e0e5d7 # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
+      SourceDestCheck: false
+      #KeyName: pawel
+      NetworkInterfaces:
+      - GroupSet:
+        - Ref: NatInstanceSercurityGroup1
+        - Ref: EFSSecurityGroup
+        AssociatePublicIpAddress: true
+        DeviceIndex: 0
+        DeleteOnTermination: true
+        SubnetId:
+          Ref: PublicSubnet1
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          sysctl -w net.ipv4.ip_forward=1
+          /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+          yum install -y iptables-services
+          service iptables save
+
+  NatInstanceSercurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the NAT instnace
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: 10.0.11.0/24
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 10.0.11.0/24
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+
+  NatInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t4g.nano
+      ImageId: ami-0636eac5d73e0e5d7 # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
+      SourceDestCheck: false
+      #KeyName: pawel
+      NetworkInterfaces:
+      - GroupSet:
+        - Ref: NatInstanceSercurityGroup2
+        - Ref: EFSSecurityGroup
+        AssociatePublicIpAddress: true
+        DeviceIndex: 0
+        DeleteOnTermination: true
+        SubnetId:
+          Ref: PublicSubnet2
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          sysctl -w net.ipv4.ip_forward=1
+          /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+          yum install -y iptables-services
+          service iptables save
+
+  NatInstanceSercurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the NAT instnace
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: 10.0.12.0/24
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 10.0.12.0/24
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+
+  EFSSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: "A security group for Amazon EFS that allows inbound NFS access from resources (including the mount target) associated with this security group (TCP 2049)."
+      SecurityGroupEgress:
+        - FromPort: -1
+          ToPort: -1
+          IpProtocol: "-1"
+          Description: ""
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - FromPort: 2049
+          ToPort: 2049
+          IpProtocol: "tcp"
+          Description: "Allow NFS traffic - TCP 2049"
+          CidrIp: 0.0.0.0/0
+      GroupName: "allow-efs-traffic"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NatInstance1
+
+  PrivateRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NatInstance2
+
+  PrivateRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+  FileSystemResource:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      #AvailabilityZoneName: us-east-1a # single AZ
+      Encrypted: false
+      FileSystemPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "elasticfilesystem:ClientMount"
+            Principal:
+              AWS: "*"
+
+  MountTargetResource1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystemResource
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroups:
+      - !Ref EFSSecurityGroup
+
+  MountTargetResource2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystemResource
+      SubnetId: !Ref PrivateSubnet2
+      SecurityGroups:
+      - !Ref EFSSecurityGroup
+
+  AccessPointResource:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystemResource
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: "1000"
+          OwnerUid: "1000"
+          Permissions: "0777"
+        Path: "/LOBSnapshots"
+
   GetSnapshots0:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 0
 
   GetSnapshots1:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 1
 
   GetSnapshots2:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 2
 
   GetSnapshots3:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 3
 
   GetSnapshots4:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 4
 
   GetSnapshots5:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
     Properties:
       Handler: functions/get_snapshots.lambda_handler
-      Runtime: python3.6
+      Architectures:
+        - arm64
+      Runtime: python3.9
       Timeout: 900
       MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref RequestsLayer
       Policies:
-        -
-          S3CrudPolicy:
-            BucketName: !Ref LimitOrderBookSnapshots
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
       Events:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
             Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
       Environment:
         Variables:
-          BUCKET: !Ref LimitOrderBookSnapshots
+          EFS_PATH: "/mnt/efs"
           DELAY: 5
 
-  LimitOrderBookSnapshots:
-    Type: AWS::S3::Bucket
-    Properties:
-      AccessControl: Private
-      VersioningConfiguration:
-        Status: Suspended
-      LifecycleConfiguration:
-        Rules:
-          - NoncurrentVersionExpirationInDays: 3
-            Status: Enabled
+  RequestsLayer:
+      Type: AWS::Serverless::LayerVersion
+      Properties:
+        LayerName: requests-arm64
+        Description: Lambda layer with requests Arm64
+        ContentUri: layers/requests
 
   LogGroupGetSnapshots0:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots0]]
 
   LogGroupGetSnapshots1:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots1]]
 
   LogGroupGetSnapshots2:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots2]]
 
   LogGroupGetSnapshots3:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots3]]
 
   LogGroupGetSnapshots4:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots4]]
 
   LogGroupGetSnapshots5:
     Type: AWS::Logs::LogGroup
     Properties: 
-      RetentionInDays: 7
+      RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots5]]
 
   MetricFilterGetSnapshots0:
@@ -256,9 +619,167 @@ Resources:
         - !Ref AlarmNotificationTopic
         ComparisonOperator: GreaterThanThreshold
 
-  AlarmNotificationTopic:
-    Type: AWS::SNS::Topic
+  # AlarmNotificationTopic:
+  #   Type: AWS::SNS::Topic
+  #   Properties:
+  #     Subscription:
+  #     - Protocol: email
+  #       Endpoint: !Ref NotificationEmail
+
+  Snapshots:
+    Type: AWS::S3::Bucket
     Properties:
-      Subscription:
-      - Protocol: email
-        Endpoint: !Ref NotificationEmail
+      #BucketName: Snapshots
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - NoncurrentVersionExpirationInDays: 3
+            Status: Enabled
+
+  CodeBuildProject:
+    DependsOn: ECR
+    Type: AWS::CodeBuild::Project
+    Properties:
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: linuxContainer
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Ref 'AWS::AccountId'
+          - Name: SERVICE_NAME
+            Type: PLAINTEXT
+            Value: !Ref DailyAggregationServiceName
+          - Name: ECR_NAME
+            Type: PLAINTEXT
+            Value: !Ref ECR
+      Source:
+        Type: GITHUB
+        Location: https://github.com/ratajczak/LOB-snapshots
+      SourceVersion: refs/heads/master
+      TimeoutInMinutes: 10
+      # VpcConfig:
+      #   VpcId: !Ref VPC
+      #   Subnets: [!Ref PrivateSubnet1]
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+        - arn:aws:iam::aws:policy/AmazonECS_FullAccess
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess #remove when not needed
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+
+  CodeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Codebuild Internet Group
+      GroupDescription: 'CodeBuild SecurityGroup'
+      VpcId: !Ref VPC
+
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - "*"
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      CapacityProviders:
+        - FARGATE_SPOT
+
+  AggregateDayTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 1024
+      Memory: 4GB
+      ContainerDefinitions:
+        -
+          Name: "AggregateDayTask"
+          Image: !Join ['', [!Ref 'AWS::AccountId', '.dkr.ecr.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref ECR, ':latest']]
+          #Cpu: 1
+          # Memory: 4096
+          Essential: true
+          WorkingDirectory: "/usr/src/app"
+          MountPoints:
+            - ContainerPath: /efs
+              SourceVolume: efs-test
+          LogConfiguration:
+              LogDriver: "awslogs"
+              Options:
+                "awslogs-group": !Ref LogGroupAggregateDayTask
+                "awslogs-region": !Ref 'AWS::Region'
+                "awslogs-stream-prefix": "ecs"
+          Command:
+             - "python3"
+             - "aggregation_s3.py"
+          Environment:
+            -
+              Name: BUCKET
+              Value: !Ref Snapshots
+      Volumes:
+        - Name: 'efs-test'
+          EFSVolumeConfiguration:
+            FilesystemId:
+              !Ref FileSystemResource
+            RootDirectory: "/"
+            TransitEncryption: DISABLED
+      NetworkMode: awsvpc
+      # TaskRoleArn:
+      #   Fn::ImportValue: !Sub '${LBStackName}-TaskRoleArn'
+      ExecutionRoleArn: !GetAtt AggregateDayTaskExecutionRole.Arn
+
+  LogGroupAggregateDayTask:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Join ["", ["/aws/ecs/", !Ref DailyAggregationServiceName]]
+
+  AggregateDayTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ["ecs-tasks.amazonaws.com"]
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'

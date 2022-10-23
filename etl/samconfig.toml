@@ -2,10 +2,10 @@ version = 0.1
 [default]
 [default.deploy]
 [default.deploy.parameters]
-stack_name = "limit-order-books-poloniex-6lambdas"
-s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-b7t4hxqc4mrk"
-s3_prefix = "limit-order-books-poloniex-6-lambdas"
-region = "us-east-2"
+stack_name = "lob-poloniex-v2"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-aaas4k78950g"
+s3_prefix = "limit-order-books-poloniex-v2"
+region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "NotificationEmail=\"myemail\""
 
