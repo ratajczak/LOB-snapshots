@@ -10,6 +10,9 @@ import shutil
 # ptvsd.enable_attach(address=('0.0.0.0', 5890), redirect_output=True)
 # ptvsd.wait_for_attach()
 
+# environ['DELAY'] = '0'
+# environ['EFS_PATH'] = '/tmp'
+
 TEMP_FOLDER = '/tmp/LOB'
 makedirs(TEMP_FOLDER, exist_ok=True) 
 
@@ -21,7 +24,7 @@ def get_lob_snapshot(request_id, lock, thread_number):
     request_time = gmtime()
     start_datetime = datetime.utcnow()
     print(f'{request_id} | #{thread_number} | {str(start_datetime).split(" ")[1]} | start')
-    response = get('https://poloniex.com/public?command=returnOrderBook&currencyPair=all&depth=100')
+    response = get('https://poloniex.com/public?command=returnOrderBook&currencyPair=all&depth=100', timeout=10)
     print(f'{request_id} | #{thread_number} | {str(datetime.utcnow()).split(" ")[1]} | http: {response.status_code}')
 
     if response.status_code == 200:
@@ -45,8 +48,6 @@ def get_lob_snapshot(request_id, lock, thread_number):
                 with open(filename, 'a') as outfile:
                     outfile.write(book_json_string)
                     outfile.close()
-                    #print(f'Snapshot {filename} appended RequestId: {request_id}')
-
     else:
         print(f'Error | {response}')
         print(response.content)
@@ -74,16 +75,16 @@ def lambda_handler(event, context):
     for thread in threads:
         thread.join()
 
-    files = listdir(TEMP_FOLDER)
-    for file_name in files:
-        print(f'Moving {file_name} to EFS')
-        today_folder = file_name.split('-')[1][0:8]
-        pair = file_name.split('-')[0]
+    pairs = listdir(TEMP_FOLDER)
+    for pair_file in pairs:
+        print(f'Moving {pair_file} to EFS')
+        today_folder = pair_file.split('-')[1][0:8]
+        pair = pair_file.split('-')[0]
         makedirs(f'{esf_path}/{today_folder}/{pair}', exist_ok=True)
-        shutil.move(f'{TEMP_FOLDER}/{file_name}', f'{esf_path}/{today_folder}/{pair}/{file_name}')
+        shutil.move(f'{TEMP_FOLDER}/{pair_file}', f'{esf_path}/{today_folder}/{pair}/{pair_file}_{delay}')
 
 # class Object(object):
 #     pass
 # context = Object()
 # context.aws_request_id = '84bbc9aa-2669-45ce-bc0f-2b82ef890874'
-# lambda_handler({}, context)s
+# lambda_handler({}, context)
