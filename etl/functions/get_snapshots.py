@@ -1,90 +1,165 @@
-from os import makedirs, environ, listdir, path
+from os import makedirs, environ, listdir, remove
 from time import gmtime, sleep, strftime
 from datetime import datetime
-from json import loads, dumps
-from requests import get
+from requests import adapters, Session
+
 from threading import Timer, Lock
-import shutil
+import gzip
+from shutil import rmtree
+import polars as pl
+import io
 
 # import ptvsd
 # ptvsd.enable_attach(address=('0.0.0.0', 5890), redirect_output=True)
 # ptvsd.wait_for_attach()
 
-# environ['DELAY'] = '0'
-# environ['EFS_PATH'] = '/tmp'
+environ['SYMBOL0'] = 'ETH_BTC'
+environ['SYMBOL1'] = 'ETC_BTC'
+environ['SYMBOL2'] = 'LTC_BTC'
+environ['SYMBOL3'] = 'NXT_BTC'
+environ['SYMBOL4'] = 'STR_BTC'
+environ['SYMBOL5'] = 'XEM_BTC'
+environ['SYMBOL6'] = 'XRP_BTC'
+environ['EFS_PATH'] = '/tmp'
 
-TEMP_FOLDER = '/tmp/LOB'
-makedirs(TEMP_FOLDER, exist_ok=True) 
+SYMBOLS_NO = 7
+SYMBOLS = []
+for i in range(SYMBOLS_NO):
+    SYMBOLS.append(environ[f'SYMBOL{i}'])
 
-delay = environ['DELAY']
-esf_path = environ['EFS_PATH']
+EFS_PATH = environ['EFS_PATH']
 
-def get_lob_snapshot(request_id, lock, thread_number):
-    # Get LOB snapshots for all pairs from Poloniex
-    request_time = gmtime()
-    start_datetime = datetime.utcnow()
-    print(f'{request_id} | #{thread_number} | {str(start_datetime).split(" ")[1]} | start')
-    response = get('https://poloniex.com/public?command=returnOrderBook&currencyPair=all&depth=100', timeout=10)
-    print(f'{request_id} | #{thread_number} | {str(datetime.utcnow()).split(" ")[1]} | http: {response.status_code}')
+def get_lob_snapshot(lambda_id, session, thread_number, lock, symbol, book_list):
+    try:
+        request_time = gmtime()
+        start = datetime.utcnow()
 
-    if response.status_code == 200:
+        response = session.get(f'https://api.poloniex.com/markets/{symbol}/orderBook?limit=10', timeout=10)
+
+        got_response =  datetime.utcnow()
+
+        poloniex_timestamp = int(response.text[12:26])/1000
+        poloniex_datetime = datetime.fromtimestamp(poloniex_timestamp)
+
+        if response.status_code == 200:
+            #print('RESPONSE: ')
+            #print(response.text)
+
+            this_hour = strftime('%Y%m%d_%H', request_time)
+            this_minute_second = strftime('%M%S', request_time)
+            snapshot_id = f'{symbol}-{this_hour}{this_minute_second}'
+
+            book = response.text.replace("\n", "")
+            #start1 = datetime.utcnow()
+            book_IO = io.StringIO()
+            book_IO.write(book)
+            nested = pl.read_ndjson(book_IO)
+
+            asks = pl.DataFrame(nested["asks"].explode())
+            bids = pl.DataFrame(nested["bids"].explode())
+
+            asks_bids_sizes_prices = pl.concat([asks,bids], how="horizontal").with_row_count().with_column(
+                    (pl.col("row_nr")/2).cast(pl.Int16).alias("level")
+                ).drop("row_nr").groupby("level").agg(
+                    [
+                        pl.first('asks').cast(pl.Float32).alias('ask_price'),
+                        pl.last('asks').cast(pl.Float32).alias('ask_size'),
+                        pl.first('bids').cast(pl.Float32).alias('bid_price'),
+                        pl.last('bids').cast(pl.Float32).alias('bid_size'),
+                    ]
+            ).sort("level")
+
+            book = asks_bids_sizes_prices.join(
+                nested.drop(["asks", "bids"]).with_column(
+                    pl.lit(f'{symbol}-{this_hour}{this_minute_second}').alias("key")
+                ).with_column(
+                    pl.lit(0).cast(pl.Int16).alias("level")
+                ), on="level", how="outer").fill_null(strategy="forward")
+
+            #book = nested.drop(["asks", "bids"]).with_column(pl.lit(0).cast(pl.Int16).alias("level")).join(asks_bids_sizes_prices, on="level", how="outer").fill_null(strategy="forward")
+
+            #timing = datetime.utcnow() - start1
+            book_list.append(book)
+
+        else:
+            with lock:
+                print(f'{lambda_id} | {symbol} #{thread_number} | Error | {response.content}')
+
         with lock:
-            all_books = loads(response.text)
-            for pair in all_books:
-                book = all_books[pair]
-
-                this_hour = strftime('%Y%m%d_%H', request_time)
-                this_minute_second = strftime('%M%S', request_time)
-                part = int(request_time.tm_min / 10) # Lambda fires 60 / 10 = 6 times a hour
-
-                filename = f'{TEMP_FOLDER}/{pair}-{this_hour}-{part}'
-
-                # comma in front if appending
-                if path.exists(filename):
-                    book_json_string = f',"{pair}-{this_hour}{this_minute_second}": {dumps(book)}'
-                else:
-                    book_json_string = f'"{pair}-{this_hour}{this_minute_second}": {dumps(book)}'
-
-                with open(filename, 'a') as outfile:
-                    outfile.write(book_json_string)
-                    outfile.close()
-    else:
-        print(f'Error | {response}')
-        print(response.content)
-    print(f'{request_id} | #{thread_number} | {str(datetime.utcnow()).split(" ")[1]} | end ')
-    print(f'{request_id} | #{thread_number} total: {str(datetime.utcnow() - start_datetime).split(":")[-1]} seconds')
-    print('-') #log separator for easer viewing
+            # print thread number separtor for better log readabiliy 
+            global thread_counter
+            if thread_counter < thread_number:
+                thread_counter = thread_number
+                print(f'{lambda_id} -')
+    
+            print(f'{lambda_id} | {symbol} #{thread_number} | request {str(start).split(" ")[1]} || poloniex {str(poloniex_datetime).split(" ")[1]} || response {str(got_response).split(" ")[1]} | end {str(datetime.utcnow()).split(" ")[1]} | total {str(datetime.utcnow() - start).split(":")[-1]} | delay {str(datetime.utcnow() - poloniex_datetime).split(":")[-1]}')
+    except Exception as e:
+        print(f'{lambda_id} | {symbol} #{thread_number} | Exception | {e}')
     return
 
 def lambda_handler(event, context):
 
+    request_time = gmtime()
+    symbols_books = {}
+    for i in range(SYMBOLS_NO):
+        symbols_books[SYMBOLS[i]] = []
+
     # starting from next miute (to mitigate delayed AWS cron starts)
-    sleep(1) # ensure not first second
-    till_next_minute = (60 - gmtime().tm_sec % 60) % 60
+
     threads = []
-    lock = Lock()
     thread_number = 0
-    # Start threads with 6 second interval for 10 minutes (100 in total)
-    # executed 6 times an hour = 600 snapshots an hour in total
-    for seconds_to_wait in range(till_next_minute + int(delay), till_next_minute + int(delay) + 10 * 60, 6):
-        thread = Timer(seconds_to_wait, get_lob_snapshot, [context.aws_request_id, lock, thread_number])
-        thread.start()
-        threads.append(thread)
+    global thread_counter
+    thread_counter = 0
+    lock = Lock()
+    lambda_id = context.aws_request_id.split('-')[-1]
+    time_slippage = -0.2
+
+    session = Session()
+    adapter = adapters.HTTPAdapter(pool_connections=6000, pool_maxsize=6000)
+    session.mount('https://', adapter)
+
+    sleep(1) # ensure not first second
+    now = datetime.utcnow()
+    till_next_minute = 60 - now.second - now.microsecond / 1000000
+    #sleep(till_next_minute)
+    print(f'{lambda_id} | {datetime.utcnow()} starting threads')
+
+    # Start threads with 1 second interval for 10 minutes (600 in total)
+    # executed 6 times an hour = 3600 snapshots an hour in total
+    for seconds_to_wait in range(0, 10, 1): #range(0, 10 * 60, 1):
+        for symbol in SYMBOLS:
+            thread = Timer(seconds_to_wait - time_slippage, get_lob_snapshot, [lambda_id, session, thread_number, lock, symbol, symbols_books[symbol]])
+            thread.start()
+            threads.append(thread)
+        time_slippage += 0.003
         thread_number += 1
     # Wait for all threads to finish
     for thread in threads:
         thread.join()
 
-    pairs = listdir(TEMP_FOLDER)
-    for pair_file in pairs:
-        print(f'Moving {pair_file} to EFS')
-        today_folder = pair_file.split('-')[1][0:8]
-        pair = pair_file.split('-')[0]
-        makedirs(f'{esf_path}/{today_folder}/{pair}', exist_ok=True)
-        shutil.move(f'{TEMP_FOLDER}/{pair_file}', f'{esf_path}/{today_folder}/{pair}/{pair_file}_{delay}')
+    this_hour = strftime('%Y%m%d_%H', request_time)
+    part = int(request_time.tm_min / 10) # Lambda fires 60 / 10 = 6 times a hour
 
-# class Object(object):
-#     pass
-# context = Object()
-# context.aws_request_id = '84bbc9aa-2669-45ce-bc0f-2b82ef890874'
-# lambda_handler({}, context)
+    # for pair_folder in pairs:
+    #     print(f'Concatenating, compressing and saving {pair_folder} on EFS')
+    #     today_folder = pair_folder.split('-')[1][0:8]
+    #     pair = pair_folder.split('-')[0]
+    #     makedirs(f'{esf_path}/{today_folder}/{pair}', exist_ok=True)
+
+    #     files = listdir(f'{TEMP_FOLDER}/{pair_folder}')
+    #     books = []
+    #     for file_name in files:
+    #         with open(f'{TEMP_FOLDER}/{pair_folder}/{file_name}', 'r') as f:
+    #             books.append(f.read())
+    #         remove(f'{TEMP_FOLDER}/{pair_folder}/{file_name}')
+    #     all_books_json_string = ','.join(books)
+    #     #print(f'CONTENT of {pair_folder}.gz')
+
+    #     with gzip.open(f'{esf_path}/{today_folder}/{pair}/{pair_folder}.gz', 'wb') as f:
+    #         f.write(all_books_json_string.encode())
+
+class Object(object):
+    pass
+context = Object()
+context.aws_request_id = '84bbc9aa-2669-45ce-bc0f-2b82ef890874'
+lambda_handler({}, context)
