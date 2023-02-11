@@ -1,165 +1,140 @@
-from os import makedirs, environ, listdir, remove
+from os import makedirs, environ
 from time import gmtime, sleep, strftime
 from datetime import datetime
 from requests import adapters, Session
-
 from threading import Timer, Lock
-import gzip
-from shutil import rmtree
 import polars as pl
 import io
 
-# import ptvsd
-# ptvsd.enable_attach(address=('0.0.0.0', 5890), redirect_output=True)
-# ptvsd.wait_for_attach()
+# environ['SYMBOL0'] = 'ETH_BTC'
+# environ['SYMBOL1'] = 'ETC_BTC'
+# environ['SYMBOL2'] = 'LTC_BTC'
+# environ['SYMBOL3'] = 'NXT_BTC'
+# environ['SYMBOL4'] = 'TRX_BTC'
+# environ['EFS_PATH'] = '/tmp'
+# environ['DELAY'] = '0'
 
-environ['SYMBOL0'] = 'ETH_BTC'
-environ['SYMBOL1'] = 'ETC_BTC'
-environ['SYMBOL2'] = 'LTC_BTC'
-environ['SYMBOL3'] = 'NXT_BTC'
-environ['SYMBOL4'] = 'STR_BTC'
-environ['SYMBOL5'] = 'XEM_BTC'
-environ['SYMBOL6'] = 'XRP_BTC'
-environ['EFS_PATH'] = '/tmp'
-
-SYMBOLS_NO = 7
 SYMBOLS = []
-for i in range(SYMBOLS_NO):
-    SYMBOLS.append(environ[f'SYMBOL{i}'])
+SYMBOLS.append(environ['SYMBOL0'])
+SYMBOLS.append(environ['SYMBOL1'])
+SYMBOLS.append(environ['SYMBOL2'])
+SYMBOLS.append(environ['SYMBOL3'])
+SYMBOLS.append(environ['SYMBOL4'])
 
 EFS_PATH = environ['EFS_PATH']
+DELAY = environ['DELAY']
 
-def get_lob_snapshot(lambda_id, session, thread_number, lock, symbol, book_list):
+def get_lob_snapshot(lambda_id, session, scheduler_thread, worker_thread, lock, symbol, book_list):
     try:
-        request_time = gmtime()
         start = datetime.utcnow()
-
-        response = session.get(f'https://api.poloniex.com/markets/{symbol}/orderBook?limit=10', timeout=10)
-
+        response = session.get(f'https://api.poloniex.com/markets/{symbol}/orderBook?limit=100', timeout=10)
         got_response =  datetime.utcnow()
 
-        poloniex_timestamp = int(response.text[12:26])/1000
-        poloniex_datetime = datetime.fromtimestamp(poloniex_timestamp)
-
         if response.status_code == 200:
-            #print('RESPONSE: ')
-            #print(response.text)
-
-            this_hour = strftime('%Y%m%d_%H', request_time)
-            this_minute_second = strftime('%M%S', request_time)
-            snapshot_id = f'{symbol}-{this_hour}{this_minute_second}'
-
+            #print(f'RESPONSE: {response.text}')
+            poloniex_timestamp = int(response.text[12:26])/1000
+            poloniex_datetime = datetime.fromtimestamp(poloniex_timestamp)
             book = response.text.replace("\n", "")
-            #start1 = datetime.utcnow()
-            book_IO = io.StringIO()
-            book_IO.write(book)
-            nested = pl.read_ndjson(book_IO)
-
-            asks = pl.DataFrame(nested["asks"].explode())
-            bids = pl.DataFrame(nested["bids"].explode())
-
-            asks_bids_sizes_prices = pl.concat([asks,bids], how="horizontal").with_row_count().with_column(
-                    (pl.col("row_nr")/2).cast(pl.Int16).alias("level")
-                ).drop("row_nr").groupby("level").agg(
-                    [
-                        pl.first('asks').cast(pl.Float32).alias('ask_price'),
-                        pl.last('asks').cast(pl.Float32).alias('ask_size'),
-                        pl.first('bids').cast(pl.Float32).alias('bid_price'),
-                        pl.last('bids').cast(pl.Float32).alias('bid_size'),
-                    ]
-            ).sort("level")
-
-            book = asks_bids_sizes_prices.join(
-                nested.drop(["asks", "bids"]).with_column(
-                    pl.lit(f'{symbol}-{this_hour}{this_minute_second}').alias("key")
-                ).with_column(
-                    pl.lit(0).cast(pl.Int16).alias("level")
-                ), on="level", how="outer").fill_null(strategy="forward")
-
-            #book = nested.drop(["asks", "bids"]).with_column(pl.lit(0).cast(pl.Int16).alias("level")).join(asks_bids_sizes_prices, on="level", how="outer").fill_null(strategy="forward")
-
-            #timing = datetime.utcnow() - start1
-            book_list.append(book)
+            book_with_request_timestamp = book[:-1] + f', "Datetime": {int(datetime.timestamp(start)*1000)}' + '}'
+            book_list.append(book_with_request_timestamp)
 
         else:
             with lock:
-                print(f'{lambda_id} | {symbol} #{thread_number} | Error | {response.content}')
+                print(f'{lambda_id} | {symbol} #{scheduler_thread}-{worker_thread} | Error | {response.content}')
 
         with lock:
-            # print thread number separtor for better log readabiliy 
+            # Print thread number separtor for better log readabiliy
             global thread_counter
-            if thread_counter < thread_number:
-                thread_counter = thread_number
+            if thread_counter < worker_thread:
+                thread_counter = worker_thread
                 print(f'{lambda_id} -')
     
-            print(f'{lambda_id} | {symbol} #{thread_number} | request {str(start).split(" ")[1]} || poloniex {str(poloniex_datetime).split(" ")[1]} || response {str(got_response).split(" ")[1]} | end {str(datetime.utcnow()).split(" ")[1]} | total {str(datetime.utcnow() - start).split(":")[-1]} | delay {str(datetime.utcnow() - poloniex_datetime).split(":")[-1]}')
+            print(f'{lambda_id} | {symbol} #{scheduler_thread}-{worker_thread} | req {str(start).split(" ")[1]} | poloniex {str(poloniex_datetime).split(" ")[1]} | resp {str(got_response).split(" ")[1]} | end {str(datetime.utcnow()).split(" ")[1]} | total {str(datetime.utcnow() - start).split(":")[-1]} | delay {str(datetime.utcnow() - poloniex_datetime).split(":")[-1]}')
+
     except Exception as e:
-        print(f'{lambda_id} | {symbol} #{thread_number} | Exception | {e}')
+        print(f'{lambda_id} | {symbol} #{scheduler_thread}-{worker_thread} | Exception | {e}')
     return
+
+def thread_scheduler(lambda_id, session, scheduler_counter, lock, symbols_books):
+    with lock:
+        print(f'{lambda_id} | Scheduler thread #{scheduler_counter} started ')
+    worker_counter = 0
+    worker_threads = []
+    now = datetime.utcnow()
+    till_next_10seconds = 10 - now.second % 10 - now.microsecond / 1000000
+    sleep(till_next_10seconds)  # Start worker thread at round minutes
+    with lock:
+        print(f'{lambda_id} | Scheduler thread #{scheduler_counter} dispatching worker threads')
+    global thread_counter
+    thread_counter = 0
+
+    time_slippage = 0
+    for seconds_to_wait in range(int(DELAY), int(DELAY) + 10, 1): # Every second fo 10 seconds
+        for symbol in SYMBOLS:
+            #print(f'{lambda_id} | Starting worker thread {symbol} #{scheduler_counter}-{worker_counter}')
+            worker_thread = Timer(seconds_to_wait + 0.3 - time_slippage, get_lob_snapshot, [lambda_id, session, scheduler_counter, worker_counter, lock, symbol, symbols_books[symbol]])
+            worker_thread.start()
+            worker_threads.append(worker_thread)
+        worker_counter +=1
+        time_slippage += 0.005
+    for worker_thread in worker_threads:
+        worker_thread.join() # Wait for all threads to finish
 
 def lambda_handler(event, context):
 
     request_time = gmtime()
     symbols_books = {}
-    for i in range(SYMBOLS_NO):
-        symbols_books[SYMBOLS[i]] = []
+    for symbol in SYMBOLS:
+        symbols_books[symbol] = []
 
-    # starting from next miute (to mitigate delayed AWS cron starts)
+    # starting from the next miute to mitigate delayed AWS cron starts
+    scheduler_threads = []
 
-    threads = []
-    thread_number = 0
-    global thread_counter
+    global thread_counter # For log readability
     thread_counter = 0
+
     lock = Lock()
     lambda_id = context.aws_request_id.split('-')[-1]
-    time_slippage = -0.2
 
     session = Session()
-    adapter = adapters.HTTPAdapter(pool_connections=6000, pool_maxsize=6000)
+    adapter = adapters.HTTPAdapter(pool_connections=1000, pool_maxsize=1000)
     session.mount('https://', adapter)
+    sleep(1) # ensure not the first second
 
-    sleep(1) # ensure not first second
+    scheduler_interval = 10
+    scheduler_counter = 0
+    # Start scheduler threads with 10 seconds interval for 10 minutes (60 in total), each scheduler starts 10 worker threads per symbol (600 snapshots per 10 minutes)
+    # Lambda is executed 6 times an hour = 3600 snapshots an hour in total
+
     now = datetime.utcnow()
-    till_next_minute = 60 - now.second - now.microsecond / 1000000
-    #sleep(till_next_minute)
-    print(f'{lambda_id} | {datetime.utcnow()} starting threads')
+    till_next_minute_minus9sec = 60 - 9 - now.second - now.microsecond / 1000000
+    sleep(till_next_minute_minus9sec)
 
-    # Start threads with 1 second interval for 10 minutes (600 in total)
-    # executed 6 times an hour = 3600 snapshots an hour in total
-    for seconds_to_wait in range(0, 10, 1): #range(0, 10 * 60, 1):
-        for symbol in SYMBOLS:
-            thread = Timer(seconds_to_wait - time_slippage, get_lob_snapshot, [lambda_id, session, thread_number, lock, symbol, symbols_books[symbol]])
-            thread.start()
-            threads.append(thread)
-        time_slippage += 0.003
-        thread_number += 1
-    # Wait for all threads to finish
-    for thread in threads:
-        thread.join()
+    for seconds_to_wait in range(int(DELAY), int(DELAY) + 60 * scheduler_interval, scheduler_interval): # One 10 seconds
+        print(f'{lambda_id} | Starting scheduler thread #{scheduler_counter}')
+        scheduler_thread = Timer(seconds_to_wait, thread_scheduler, [lambda_id, session, scheduler_counter, lock, symbols_books])
+        scheduler_thread.start()
+        scheduler_threads.append(scheduler_thread)
+        scheduler_counter +=1
+
+    for scheduler_thread in scheduler_threads:
+        scheduler_thread.join() # Wait for all threads to finish
 
     this_hour = strftime('%Y%m%d_%H', request_time)
     part = int(request_time.tm_min / 10) # Lambda fires 60 / 10 = 6 times a hour
+    today_folder = this_hour.split('_')[0]
 
-    # for pair_folder in pairs:
-    #     print(f'Concatenating, compressing and saving {pair_folder} on EFS')
-    #     today_folder = pair_folder.split('-')[1][0:8]
-    #     pair = pair_folder.split('-')[0]
-    #     makedirs(f'{esf_path}/{today_folder}/{pair}', exist_ok=True)
+    for symbol in symbols_books:
+        makedirs(f'{EFS_PATH}/{today_folder}/{symbol}', exist_ok=True)
 
-    #     files = listdir(f'{TEMP_FOLDER}/{pair_folder}')
-    #     books = []
-    #     for file_name in files:
-    #         with open(f'{TEMP_FOLDER}/{pair_folder}/{file_name}', 'r') as f:
-    #             books.append(f.read())
-    #         remove(f'{TEMP_FOLDER}/{pair_folder}/{file_name}')
-    #     all_books_json_string = ','.join(books)
-    #     #print(f'CONTENT of {pair_folder}.gz')
+        joined = '\n'.join(symbols_books[symbol])
+        book_IO = io.StringIO()
+        book_IO.write(joined)
+        symbol_books_nested = pl.read_ndjson(book_IO)
+        symbol_books_nested.write_parquet(f'{EFS_PATH}/{today_folder}/{symbol}/{symbol}-{this_hour}-{part}.parquet', compression='snappy')
 
-    #     with gzip.open(f'{esf_path}/{today_folder}/{pair}/{pair_folder}.gz', 'wb') as f:
-    #         f.write(all_books_json_string.encode())
-
-class Object(object):
-    pass
-context = Object()
-context.aws_request_id = '84bbc9aa-2669-45ce-bc0f-2b82ef890874'
-lambda_handler({}, context)
+# class Object(object):
+#     pass
+# context = Object()
+# context.aws_request_id = '84bbc9aa-2669-45ce-bc0f-2b82ef890874'
+# lambda_handler({}, context)

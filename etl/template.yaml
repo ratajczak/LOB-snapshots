@@ -10,6 +10,10 @@ Parameters:
     Default: 0.0246
     Description: Spot Instance bid price
     Type: String
+  LOBFolderName:
+    Description: String text of service name
+    Default: 'LOBSnapshots'
+    Type: String   
   DailyAggregationServiceName:
     Description: String text of service name
     Default: 'LOBDailyAggregation'
@@ -66,7 +70,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t4g.nano
-      ImageId: ami-0636eac5d73e0e5d7 # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
+      ImageId: ami-0f822d3c9e0532335 #ami-0636eac5d73e0e5d7 # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
       SourceDestCheck: false
       #KeyName: pawel
       NetworkInterfaces:
@@ -118,7 +122,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t4g.nano
-      ImageId: ami-0636eac5d73e0e5d7 # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
+      ImageId: ami-0f822d3c9e0532335
       SourceDestCheck: false
       #KeyName: pawel
       NetworkInterfaces:
@@ -289,7 +293,7 @@ Resources:
           OwnerGid: "1000"
           OwnerUid: "1000"
           Permissions: "0777"
-        Path: "/LOBSnapshots"
+        Path: "/LOBSnapshots" #!Ref LOBFolderName
 
   GetSnapshots0:
     Type: AWS::Serverless::Function
@@ -310,6 +314,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -317,7 +322,7 @@ Resources:
         RunEveryTenMinutes:
           Type: Schedule
           Properties:
-            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting at 9th minute of each hour
+            Schedule: cron(9,19,29,39,49,59 * * * ? *) # every 10 minutes starting 1 minute before 10th min interval
       FileSystemConfigs:
         - LocalMountPath: "/mnt/efs"
           Arn: !GetAtt AccessPointResource.Arn
@@ -325,6 +330,11 @@ Resources:
         Variables:
           EFS_PATH: "/mnt/efs"
           DELAY: 0
+          SYMBOL0: 'UT_USDT'
+          SYMBOL1: 'TRR_USDT'
+          SYMBOL2: 'BTT_USDT'
+          SYMBOL3: 'FCT2_USDT'
+          SYMBOL4: 'TRX_USDT'
 
   GetSnapshots1:
     Type: AWS::Serverless::Function
@@ -345,6 +355,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -359,7 +370,12 @@ Resources:
       Environment:
         Variables:
           EFS_PATH: "/mnt/efs"
-          DELAY: 1
+          DELAY: 0
+          SYMBOL0: 'BTC_USDT'
+          SYMBOL1: 'VOLT_USDT'
+          SYMBOL2: 'BNB_USDT'
+          SYMBOL3: 'ETH_BTC'
+          SYMBOL4: 'LTC_BTC'
 
   GetSnapshots2:
     Type: AWS::Serverless::Function
@@ -380,6 +396,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -394,7 +411,12 @@ Resources:
       Environment:
         Variables:
           EFS_PATH: "/mnt/efs"
-          DELAY: 2
+          DELAY: 0
+          SYMBOL0: 'AAVE_BTC'
+          SYMBOL1: 'TRX_BTC'
+          SYMBOL2: 'XRP_BTC'
+          SYMBOL3: 'LINK_BTC'
+          SYMBOL4: 'SNX_BTC'
 
   GetSnapshots3:
     Type: AWS::Serverless::Function
@@ -415,6 +437,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -429,7 +452,12 @@ Resources:
       Environment:
         Variables:
           EFS_PATH: "/mnt/efs"
-          DELAY: 3
+          DELAY: 0
+          SYMBOL0: 'DOT_BTC'
+          SYMBOL1: 'SOL_BTC'
+          SYMBOL2: 'DOGE_BTC'
+          SYMBOL3: 'BCH_BTC'
+          SYMBOL4: 'MATIC_BTC'
 
   GetSnapshots4:
     Type: AWS::Serverless::Function
@@ -450,6 +478,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -464,7 +493,12 @@ Resources:
       Environment:
         Variables:
           EFS_PATH: "/mnt/efs"
-          DELAY: 4
+          DELAY: 0
+          SYMBOL0: 'AVA_BTC'
+          SYMBOL1: 'WBTC_BTC'
+          SYMBOL2: 'ZRX_BTC'
+          SYMBOL3: 'FIL_BTC'
+          SYMBOL4: 'TUSD_USDT'
 
   GetSnapshots5:
     Type: AWS::Serverless::Function
@@ -485,6 +519,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref RequestsLayer
+        - !Ref PolarsLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -499,7 +534,12 @@ Resources:
       Environment:
         Variables:
           EFS_PATH: "/mnt/efs"
-          DELAY: 5
+          DELAY: 0
+          SYMBOL0: 'TUSD_USDC'
+          SYMBOL1: 'USDD_USDT'
+          SYMBOL2: 'ETH_TRX'
+          SYMBOL3: 'ETHW_ETH'
+          SYMBOL4: 'AFC_USDD'
 
   RequestsLayer:
       Type: AWS::Serverless::LayerVersion
@@ -508,39 +548,46 @@ Resources:
         Description: Lambda layer with requests Arm64
         ContentUri: layers/requests
 
+  PolarsLayer:
+      Type: AWS::Serverless::LayerVersion
+      Properties:
+        LayerName: polars-arm64
+        Description: Lambda layer with polars Arm64
+        ContentUri: layers/polars
+
   LogGroupGetSnapshots0:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots0]]
 
   LogGroupGetSnapshots1:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots1]]
 
   LogGroupGetSnapshots2:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots2]]
 
   LogGroupGetSnapshots3:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots3]]
 
   LogGroupGetSnapshots4:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots4]]
 
   LogGroupGetSnapshots5:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots5]]
 
@@ -548,7 +595,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots0
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -558,7 +605,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots1
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -568,7 +615,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots2
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -578,7 +625,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots3
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -588,7 +635,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots4
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -598,7 +645,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref LogGroupGetSnapshots5
-      FilterPattern: '?Exception ?Error ?error'
+      FilterPattern: '?Exception ?rror'
       MetricTransformations:
       - MetricValue: '1'
         MetricNamespace: test/missingData
@@ -619,12 +666,12 @@ Resources:
         - !Ref AlarmNotificationTopic
         ComparisonOperator: GreaterThanThreshold
 
-  # AlarmNotificationTopic:
-  #   Type: AWS::SNS::Topic
-  #   Properties:
-  #     Subscription:
-  #     - Protocol: email
-  #       Endpoint: !Ref NotificationEmail
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Protocol: email
+        Endpoint: !Ref NotificationEmail
 
   Snapshots:
     Type: AWS::S3::Bucket
@@ -665,9 +712,6 @@ Resources:
         Location: https://github.com/ratajczak/LOB-snapshots
       SourceVersion: refs/heads/master
       TimeoutInMinutes: 10
-      # VpcConfig:
-      #   VpcId: !Ref VPC
-      #   Subnets: [!Ref PrivateSubnet1]
 
   CodeBuildRole:
     Type: AWS::IAM::Role
@@ -727,7 +771,7 @@ Resources:
       RequiresCompatibilities:
         - FARGATE
       Cpu: 1024
-      Memory: 4GB
+      Memory: 8GB
       ContainerDefinitions:
         -
           Name: "AggregateDayTask"
@@ -749,9 +793,10 @@ Resources:
              - "python3"
              - "aggregation_s3.py"
           Environment:
-            -
-              Name: BUCKET
+            - Name: BUCKET
               Value: !Ref Snapshots
+            - Name: EFS_FOLDER
+              Value: !Ref LOBFolderName
       Volumes:
         - Name: 'efs-test'
           EFSVolumeConfiguration:
@@ -760,9 +805,8 @@ Resources:
             RootDirectory: "/"
             TransitEncryption: DISABLED
       NetworkMode: awsvpc
-      # TaskRoleArn:
-      #   Fn::ImportValue: !Sub '${LBStackName}-TaskRoleArn'
       ExecutionRoleArn: !GetAtt AggregateDayTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt AggregateDayTaskRole.Arn
 
   LogGroupAggregateDayTask:
     Type: AWS::Logs::LogGroup
@@ -782,4 +826,18 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  AggregateDayTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ["ecs-tasks.amazonaws.com"]
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
