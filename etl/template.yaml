@@ -541,19 +541,88 @@ Resources:
           SYMBOL3: 'ETHW_ETH'
           SYMBOL4: 'AFC_USDD'
 
+  Aggregate:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
+    Properties:
+      Handler: functions/aggregate.lambda_handler
+      Architectures:
+        - arm64
+      Runtime: python3.9
+      Timeout: 900
+      MemorySize: 5500
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Layers:
+        - !Ref PolarsLayer
+      Policies:
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
+      Events:
+        RunDaily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(15 0 * * ? *) # at 0:15am
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
+      Environment:
+        Variables:
+          EFS_PATH: "/mnt/efs"
+
+  MoveToS3:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - MountTargetResource1
+      - MountTargetResource2
+    Properties:
+      Handler: functions/move_to_s3.lambda_handler
+      Architectures:
+        - arm64
+      Runtime: python3.9
+      Timeout: 900
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt VPC.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+      Policies:
+        - AmazonElasticFileSystemClientReadWriteAccess
+        - AWSLambdaVPCAccessExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref Snapshots
+      Events:
+        RunDaily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 0 * * ? *) # at 0:30am
+      FileSystemConfigs:
+        - LocalMountPath: "/mnt/efs"
+          Arn: !GetAtt AccessPointResource.Arn
+      Environment:
+        Variables:
+          EFS_PATH: "/mnt/efs"
+          BUCKET: !Ref Snapshots
+
   RequestsLayer:
       Type: AWS::Serverless::LayerVersion
       Properties:
         LayerName: requests-arm64
         Description: Lambda layer with requests Arm64
-        ContentUri: layers/requests
+        ContentUri: ../layers/requests
 
   PolarsLayer:
       Type: AWS::Serverless::LayerVersion
       Properties:
         LayerName: polars-arm64
         Description: Lambda layer with polars Arm64
-        ContentUri: layers/polars
+        ContentUri: ../layers/polars
 
   LogGroupGetSnapshots0:
     Type: AWS::Logs::LogGroup
@@ -590,6 +659,12 @@ Resources:
     Properties:
       RetentionInDays: 30
       LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetSnapshots5]]
+
+  LogGroupAggregate:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref Aggregate]]
 
   MetricFilterGetSnapshots0:
     Type: AWS::Logs::MetricFilter
@@ -651,6 +726,16 @@ Resources:
         MetricNamespace: test/missingData
         MetricName: GetSnapshotsError
 
+  MetricFilterAggregate:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroupAggregate
+      FilterPattern: '?Exception ?rror'
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: test/missingData
+        MetricName: GetSnapshotsError
+
   AlarmGetSnapshots:
       Type: AWS::CloudWatch::Alarm
       Properties:
@@ -684,160 +769,3 @@ Resources:
         Rules:
           - NoncurrentVersionExpirationInDays: 3
             Status: Enabled
-
-  CodeBuildProject:
-    DependsOn: ECR
-    Type: AWS::CodeBuild::Project
-    Properties:
-      ServiceRole: !GetAtt CodeBuildRole.Arn
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Environment:
-        Type: linuxContainer
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: ACCOUNT_ID
-            Type: PLAINTEXT
-            Value: !Ref 'AWS::AccountId'
-          - Name: SERVICE_NAME
-            Type: PLAINTEXT
-            Value: !Ref DailyAggregationServiceName
-          - Name: ECR_NAME
-            Type: PLAINTEXT
-            Value: !Ref ECR
-      Source:
-        Type: GITHUB
-        Location: https://github.com/ratajczak/LOB-snapshots
-      SourceVersion: refs/heads/master
-      TimeoutInMinutes: 10
-
-  CodeBuildRole:
-    Type: AWS::IAM::Role
-    Properties:
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
-        - arn:aws:iam::aws:policy/AmazonECS_FullAccess
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess #remove when not needed
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - codebuild.amazonaws.com
-
-  CodeBuildSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: Codebuild Internet Group
-      GroupDescription: 'CodeBuild SecurityGroup'
-      VpcId: !Ref VPC
-
-  ECR:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryPolicyText:
-        Version: "2012-10-17"
-        Statement:
-          -
-            Sid: AllowPushPull
-            Effect: Allow
-            Principal:
-              AWS:
-                - "*"
-            Action:
-              - "ecr:GetDownloadUrlForLayer"
-              - "ecr:BatchGetImage"
-              - "ecr:BatchCheckLayerAvailability"
-              - "ecr:PutImage"
-              - "ecr:InitiateLayerUpload"
-              - "ecr:UploadLayerPart"
-              - "ecr:CompleteLayerUpload"
-
-  ECSCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      CapacityProviders:
-        - FARGATE_SPOT
-
-  AggregateDayTask:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      RequiresCompatibilities:
-        - FARGATE
-      Cpu: 1024
-      Memory: 8GB
-      ContainerDefinitions:
-        -
-          Name: "AggregateDayTask"
-          Image: !Join ['', [!Ref 'AWS::AccountId', '.dkr.ecr.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref ECR, ':latest']]
-          #Cpu: 1
-          # Memory: 4096
-          Essential: true
-          WorkingDirectory: "/usr/src/app"
-          MountPoints:
-            - ContainerPath: /efs
-              SourceVolume: efs-test
-          LogConfiguration:
-              LogDriver: "awslogs"
-              Options:
-                "awslogs-group": !Ref LogGroupAggregateDayTask
-                "awslogs-region": !Ref 'AWS::Region'
-                "awslogs-stream-prefix": "ecs"
-          Command:
-             - "python3"
-             - "aggregation_s3.py"
-          Environment:
-            - Name: BUCKET
-              Value: !Ref Snapshots
-            - Name: EFS_FOLDER
-              Value: !Ref LOBFolderName
-      Volumes:
-        - Name: 'efs-test'
-          EFSVolumeConfiguration:
-            FilesystemId:
-              !Ref FileSystemResource
-            RootDirectory: "/"
-            TransitEncryption: DISABLED
-      NetworkMode: awsvpc
-      ExecutionRoleArn: !GetAtt AggregateDayTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt AggregateDayTaskRole.Arn
-
-  LogGroupAggregateDayTask:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      RetentionInDays: 30
-      LogGroupName: !Join ["", ["/aws/ecs/", !Ref DailyAggregationServiceName]]
-
-  AggregateDayTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ["ecs-tasks.amazonaws.com"]
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-  AggregateDayTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ["ecs-tasks.amazonaws.com"]
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
