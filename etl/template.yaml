@@ -560,6 +560,7 @@ Resources:
           - !Ref PrivateSubnet1
       Layers:
         - !Ref PolarsLayer
+        - !Ref PyarrowLayer
       Policies:
         - AmazonElasticFileSystemClientReadWriteAccess
         - AWSLambdaVPCAccessExecutionRole
@@ -623,6 +624,13 @@ Resources:
         LayerName: polars-arm64
         Description: Lambda layer with polars Arm64
         ContentUri: ../layers/polars
+
+  PyarrowLayer:
+      Type: AWS::Serverless::LayerVersion
+      Properties:
+        LayerName: pyarrow-arm64
+        Description: Lambda layer with pyarrow Arm64
+        ContentUri: ../layers/pyarrow
 
   LogGroupGetSnapshots0:
     Type: AWS::Logs::LogGroup

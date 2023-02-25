@@ -1,11 +1,12 @@
 import os
 import time
-from pathlib import Path
 import json
 from shutil import rmtree
 import polars as pl
+import pyarrow.parquet as pq
 
 #pl.Config.set_tbl_cols(20)
+
 efs_path = os.environ["EFS_PATH"]
 
 def aggregate_day(date, pair):
@@ -68,7 +69,9 @@ def aggregate_day(date, pair):
         ).collect()
 
         os.makedirs(f'{efs_path}/aggregated/{pair}', exist_ok=True)
-        data.write_parquet(f'{efs_path}/aggregated/{pair}/{date}.parquet')
+        #data.write_parquet(f'{efs_path}/aggregated/{pair}/{date}.parquet') #TODO compression?
+        pyarrow_table = data.to_arrow()
+        pq.write_table(pyarrow_table, f'{efs_path}/aggregated/{pair}/{date}.parquet', compression='ZSTD')
 
         stats['gaps'] = int((60*60*24*100 - len(data)) / 100)
         with open(f'{efs_path}/{date}/{pair}/stats.json', 'w') as file:
@@ -93,13 +96,11 @@ def lambda_handler(event, context):
     date_now = time.strftime('%Y%m%d', now)
     day_folders = os.listdir(efs_path)
     for day in day_folders:
-        if day != date_now and day != 'last_pair_heartbeat' and day != 'aggregated':
+        if day != date_now and day != 'stats' and day != 'aggregated':
             pairs = os.listdir(f'{efs_path}/{day}')
             for pair in pairs:
-                print(f'Processing {pair} for {day}')
+                print(f'Aggregating {pair} for {day}')
                 aggregate_day(day, pair)
-            
-                Path(f'{efs_path}/last_pair_heartbeat').touch()
             write_stats(day, pairs)
             rmtree(f'{efs_path}/{day}')
             break #one day at a time due to lambda timeout
