@@ -55,39 +55,51 @@ for symbol in symbols:
             start_time = int(time.mktime(single_date_time.timetuple()))
             end_time = int(time.mktime((single_date_time + timedelta(minutes=480)).timetuple()))
             response = requests.get(f'https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000', timeout=10)
-            candles = json.loads(response.content)
-            df1 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            if response.status_code == 200:
+                candles = json.loads(response.content)
+                df1 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            else:
+                print(f'Error {response.status_code} on https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000')
 
             start_time = int(time.mktime((single_date_time + timedelta(minutes=480)).timetuple()))
             end_time = int(time.mktime((single_date_time + timedelta(minutes=480*2)).timetuple()))
             response = requests.get(f'https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000', timeout=10)
-            candles = json.loads(response.content)
-            df2 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            if response.status_code == 200:
+                candles = json.loads(response.content)
+                df2 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            else:
+                print(f'Error {response.status_code} on https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000')
 
             start_time = int(time.mktime((single_date_time + timedelta(minutes=480*2)).timetuple()))
             end_time = int(time.mktime((single_date_time + timedelta(minutes=480*3)).timetuple()))
             response = requests.get(f'https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000', timeout=10)
-            candles = json.loads(response.content)
-            df3 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            if response.status_code == 200:
+                candles = json.loads(response.content)
+                df3 = pl.DataFrame(candles, columns).drop(['interval', 'ts'])
+            else:
+                print(f'Error {response.status_code} on https://api.poloniex.com/markets/{symbol}/candles?interval=MINUTE_1&limit=480&startTime={start_time}000&endTime={end_time}000')
 
-            day_candles = pl.concat([df1, df2, df3])
+            try:
+                day_candles = pl.concat([df1, df2, df3])
 
-            day_candles = day_candles.with_columns([
-                pl.col('low').first().cast(pl.Float64, strict=False).alias('low'),
-                pl.col('high').first().cast(pl.Float64, strict=False).alias('high'),
-                pl.col('open').first().cast(pl.Float64, strict=False).alias('open'),
-                pl.col('close').first().cast(pl.Float64, strict=False).alias('close'),
-                pl.col('amount').first().cast(pl.Float64, strict=False).alias('amount'),
-                pl.col('quantity').first().cast(pl.Float64, strict=False).alias('quantity'),
-                pl.col('buyTakerAmount').first().cast(pl.Float64, strict=False).alias('buyTakerAmount'),
-                pl.col('buyTakerQuantity').first().cast(pl.Float64, strict=False).alias('buyTakerQuantity'),
-                pl.col('tradeCount').first().cast(pl.Int64, strict=False).alias('tradeCount'),
-                pl.col('weightedAverage').first().cast(pl.Float64, strict=False).alias('weightedAverage'),
-                pl.col('startTime').cast(pl.Datetime, strict=False).dt.with_time_unit("ms").alias('startTime'),
-                pl.col('closeTime').cast(pl.Datetime, strict=False).dt.with_time_unit("ms").alias('closeTime')
-            ])
-            pyarrow_table = day_candles.to_arrow()
-            pq.write_table(pyarrow_table, parquet_file_name, compression='ZSTD')
-            print(f'Saved: {parquet_file_name}')
+                day_candles = day_candles.with_columns([
+                    pl.col('low').first().cast(pl.Float64, strict=False).alias('low'),
+                    pl.col('high').first().cast(pl.Float64, strict=False).alias('high'),
+                    pl.col('open').first().cast(pl.Float64, strict=False).alias('open'),
+                    pl.col('close').first().cast(pl.Float64, strict=False).alias('close'),
+                    pl.col('amount').first().cast(pl.Float64, strict=False).alias('amount'),
+                    pl.col('quantity').first().cast(pl.Float64, strict=False).alias('quantity'),
+                    pl.col('buyTakerAmount').first().cast(pl.Float64, strict=False).alias('buyTakerAmount'),
+                    pl.col('buyTakerQuantity').first().cast(pl.Float64, strict=False).alias('buyTakerQuantity'),
+                    pl.col('tradeCount').first().cast(pl.Int64, strict=False).alias('tradeCount'),
+                    pl.col('weightedAverage').first().cast(pl.Float64, strict=False).alias('weightedAverage'),
+                    pl.col('startTime').cast(pl.Datetime, strict=False).dt.with_time_unit("ms").alias('startTime'),
+                    pl.col('closeTime').cast(pl.Datetime, strict=False).dt.with_time_unit("ms").alias('closeTime')
+                ])
+                pyarrow_table = day_candles.to_arrow()
+                pq.write_table(pyarrow_table, parquet_file_name, compression='ZSTD')
+                print(f'Saved: {parquet_file_name}')
+            except Exception:
+                print(f'{parquet_file_name} not saved')
         else:
             print(f'Found: {parquet_file_name}')
